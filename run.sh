@@ -30,4 +30,4 @@ if [ -n "$DURATION" ]; then
 fi
 
 echo "[+] Атакую $PROTO://$HOST:$PORT, сокетов: $SOCKETS"
-slowattack "${ARGS[@]}" "$PROTO://$HOST/"
+slowattack "${ARGS[@]}" "$PROTO://$HOST"
