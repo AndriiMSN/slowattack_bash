@@ -11,7 +11,6 @@ echo "[+] Ставлю python..."
 pkg install -y python
 
 echo "[+] Ставлю slowloris (gkbrk, PyPI)..."
-pip install --upgrade pip --break-system-packages
 pip install --break-system-packages slowloris
 
 echo "[+] Готово. Запуск атаки:"
