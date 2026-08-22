@@ -83,6 +83,63 @@ bash run.sh 192.0.2.10 80 1000 60000 20
 sudo ./synflood.sh -h 192.0.2.10 -p 80 -r 5000 -t 30
 ```
 
+## Развёртывание тестового сервера-мишени
+
+Ниже — минимальная конфигурация **собственного** сервера (использовался DigitalOcean droplet, Ubuntu), на который затем направлялись `run.sh`/`synflood.sh`. Разворачивайте только то, чем реально владеете.
+
+**1. Создание дроплета:** Ubuntu 22.04/24.04, план от $6/мес (1 vCPU/1GB RAM достаточно — тест бьёт по числу соединений, не по мощности CPU).
+
+**2. Базовая настройка и firewall:**
+```bash
+apt update && apt upgrade -y
+ufw allow OpenSSH
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw enable
+```
+Дополнительно — DigitalOcean Cloud Firewall (Networking → Firewalls) с теми же правилами как второй независимый слой фильтрации.
+
+**3. Веб-сервер (Apache, с prefork MPM — исторически наиболее чувствителен к Slowloris, удобен для демонстрации эффекта):**
+```bash
+apt install -y apache2
+a2dismod mpm_event
+a2enmod mpm_prefork
+systemctl restart apache2
+```
+
+**4. Лимиты воркеров — считать от реального объёма RAM, не завышать:**
+```bash
+# /etc/apache2/mods-available/mpm_prefork.conf
+ServerLimit             150
+StartServers            5
+MinSpareServers         5
+MaxSpareServers         10
+MaxRequestWorkers       150
+MaxConnectionsPerChild  0
+```
+(на 1GB RAM попытка задать `ServerLimit`/`MaxRequestWorkers` в тысячи приводит к `AH00159: fork: Unable to fork new process` — нехватка памяти, а не защита; подробности в `REPORT.md`)
+
+**5. Самоподписанный TLS-сертификат для порта 443 (домен не нужен):**
+```bash
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/ssl/private/apache-selfsigned.key \
+  -out /etc/ssl/certs/apache-selfsigned.crt \
+  -subj "/CN=$(curl -s ifconfig.me)"
+
+a2enmod ssl
+a2ensite default-ssl
+systemctl restart apache2
+```
+
+**6. Проверка снаружи (с другого устройства, не с самого сервера):**
+```bash
+curl -I http://YOUR_DROPLET_IP/
+curl -Ik https://YOUR_DROPLET_IP/
+```
+Оба должны вернуть `200 OK` — сервер готов как цель для `run.sh`/`synflood.sh`.
+
+Полный разбор hardening после проведения теста (таймауты `RequestReadTimeout`, `mod_evasive`, сравнение с nginx) — в `REPORT.md`, раздел 4.
+
 ## Мониторинг во время теста
 
 На тестируемом сервере — число установленных/полуоткрытых соединений и статус веб-сервера:
